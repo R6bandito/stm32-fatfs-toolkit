@@ -1,3 +1,12 @@
+/**
+ * @file    fatfs_utils.h
+ * @brief   Public interface of the FatFs utility library.
+ *
+ *          Defines the memory allocator hooks UTILS_MALLOC / UTILS_FREE,
+ *          which default to the standard C malloc / free and can be
+ *          overridden before including this header.
+ */
+
 #ifndef __FATFS_UTILS_H__
 #define __FATFS_UTILS_H__
 
@@ -26,7 +35,10 @@
 #endif
 
 
+/* ***************************** */
 #define ENB_DEBUG       (1)
+#define DIR_DEEP        (5)
+/* ***************************** */
 
 
 #if (ENB_DEBUG)
@@ -72,12 +84,23 @@ typedef struct
 } utilsCardInfo_t;
 
 
+typedef  FRESULT (*walkFn)( const TCHAR *path, const FILINFO *fi, void *arg );
+
+
 FRESULT utils_file_write( FIL *fp, const TCHAR *path, BYTE *data, UINT size, bool isAppend );
 FRESULT utils_file_get_free_space_int( const TCHAR *path, utilsVolumeMode_t mode, uint64_t *oSpace );
 FRESULT utils_sd_speed_test( FIL *fs, const TCHAR *path, uint32_t size_mb, float* oWriteSP, float* oReadSP ); 
 FRESULT utils_sd_info( const TCHAR *path, utilsCardInfo_t *oInfo, SD_HandleTypeDef *hsd );
+FRESULT utils_file_txn_write( FIL *fp, const TCHAR *path, BYTE *data, UINT size );
+FRESULT utils_file_txn_commit( FIL *fp, const TCHAR *path );
+FRESULT utils_file_txn_abort( FIL *fp, const TCHAR *path );
+FRESULT utils_dir_walk( const TCHAR *path, walkFn cb, void *arg );
+FRESULT utils_mkdirs( const TCHAR *path );
+
 
 void utils_extract_driver_from_path( const TCHAR *path, BYTE *obuf, UINT obuf_size );
+const TCHAR *utils_extract_filename( const TCHAR *path, UINT *path_len );
 void utils_sd_info_print( const utilsCardInfo_t *info );
+void utils_dir_print( const TCHAR *path );
 
 #endif /* __FATFS_UTILS_H__ */
