@@ -96,6 +96,8 @@ FRESULT utils_file_txn_commit( FIL *fp, const TCHAR *path );
 FRESULT utils_file_txn_abort( FIL *fp, const TCHAR *path );
 FRESULT utils_dir_walk( const TCHAR *path, walkFn cb, void *arg );
 FRESULT utils_mkdirs( const TCHAR *path );
+FRESULT utils_dir_remove_recursive( const TCHAR *path );
+FRESULT utils_file_copy( FIL *fsrc, const TCHAR *src, FIL *fdst, const TCHAR *dest );
 
 
 void utils_extract_driver_from_path( const TCHAR *path, BYTE *obuf, UINT obuf_size );

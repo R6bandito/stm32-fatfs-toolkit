@@ -979,3 +979,215 @@ utils_mkdirs( const TCHAR *path )
 	return FR_OK;
 }
 
+
+/**
+ * @brief  Delete callback for utils_dir_remove_recursive(): unlinks the
+ *         current entry. A failure stops the whole walk immediately.
+ * @param  path  Full path of the entry.
+ * @param  fi    Entry information (name used in the error log).
+ * @param  arg   Unused.
+ * @retval FR_OK on success, otherwise the f_unlink error code.
+ */
+static FRESULT 
+remove_cb( const TCHAR *path, const FILINFO *fi, void *arg )
+{
+	if ( !path || !fi )
+		return FR_INVALID_PARAMETER;
+
+	FRESULT res;
+	res = f_unlink( path ); 
+	if ( res != FR_OK )
+	{
+		DEBUG( "[ERR] Delete err with [utils_dir_remove_recursive]  PATH:%s  LINE:%d. FILE: %s\n", __FILE__, __LINE__, fi->fname );
+		return res;
+	}
+
+	return FR_OK;
+}
+
+
+/**
+ * @brief  Recursively delete a directory and all of its contents
+ *         (files and subdirectories). The post-order walk guarantees the
+ *         directory itself is empty when it is removed last. Deleting the
+ *         volume root (e.g. "0:/") is rejected on purpose.
+ * @param  path  Directory to delete (absolute path).
+ * @retval FR_OK on success, otherwise a FatFs error code.
+ */
+FRESULT 
+utils_dir_remove_recursive( const TCHAR *path )
+{
+	if ( !path )
+		return FR_INVALID_PARAMETER;
+
+	const TCHAR *p = strchr( path, ':' );
+	if ( p && ( p[1] == '\0' || ( p[1] == '/' && p[2] == '\0' ) ) )
+	{
+		DEBUG( "[ERR] You can't use this API to delete root! [utils_dir_remove_recursive]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+		return FR_INVALID_PARAMETER;
+	}
+
+	FRESULT res;
+	res = utils_dir_walk( path, remove_cb, NULL );
+	if ( res != FR_OK )
+	{
+		DEBUG( "[ERR] Dir walk err! [utils_dir_remove_recursive]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+		return res;
+	}
+
+	/* Delete directory itself. */
+	res = f_unlink( path );
+	if ( res != FR_OK )
+	{
+		/* Still has remain file? Inform and Return. */
+		DEBUG( "[ERR] Dir delete err [utils_dir_remove_recursive]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+		return res;
+	}
+
+	return FR_OK;
+}
+
+
+/**
+ * @brief  Copy a file using a streaming fixed-size buffer (allocated with
+ *         UTILS_MALLOC, falling back to smaller sizes if memory is tight).
+ *         The destination is overwritten if it exists; the copy is verified
+ *         by comparing destination and source sizes afterwards.
+ * @param  fsrc  File object used for the source file.
+ * @param  src   Source path, e.g. "0:/a.dat".
+ * @param  fdst  File object used for the destination file.
+ * @param  dest  Destination path, e.g. "0:/b.dat".
+ * @retval FR_OK on success, otherwise a FatFs error code.
+ */
+FRESULT 
+utils_file_copy( FIL *fsrc, const TCHAR *src, FIL *fdst, const TCHAR *dest )
+{
+	if ( !fsrc || !fdst || !src || !dest )
+		return FR_INVALID_PARAMETER;
+
+	if ( strcmp( src, dest ) == 0 )
+		return FR_INVALID_PARAMETER;
+
+	UINT try[] = { 32, 16, 8, 4 }; 
+	UINT bufSize, br, bw;
+	FILINFO fno;
+	DWORD fsize;
+	BYTE isMallocFail = 0;
+	BYTE count = 0;
+	BYTE *buf = NULL;
+	FRESULT res;
+	do 
+	{
+		buf = UTILS_MALLOC( (try[count] * 1024) );
+		if ( !buf )
+		{
+			isMallocFail = 1;
+			DEBUG( "[WARN] Copy buf malloc fail. try malloc %d kb. [utils_file_copy]  PATH:%s  LINE:%d.\n", try[count], __FILE__, __LINE__ );
+			count++;
+			if ( count >= 4 )	
+			{
+				DEBUG( "[ERR] Copy buf malloc fail... [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+				return FR_NOT_ENOUGH_CORE;
+			}
+
+			continue;
+		}
+
+		isMallocFail = 0;
+		bufSize = (try[count] * 1024);
+	} while( isMallocFail );
+
+	res = f_open( fsrc, src, FA_OPEN_EXISTING | FA_READ );
+	if ( res != FR_OK )
+	{
+		DEBUG( "[ERR] Srouce file open err. Plz check. [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+		goto aborted;
+	}
+
+	res = f_stat( src, &fno );
+	if ( res != FR_OK )
+	{
+		DEBUG( "[ERR] Srouce file attribute get err. Plz check. [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+		goto aborted;
+	}
+	fsize = fno.fsize;
+
+	res = f_open( fdst, dest, FA_CREATE_ALWAYS | FA_WRITE );
+	if ( res != FR_OK )
+	{
+		DEBUG( "[ERR] Copy file create err. Plz check. [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+		goto aborted;
+	}
+
+	#if (FF_USE_EXPAND)
+	res = f_expand( fdst, fno.fsize, 1 );
+	if ( res == FR_DENIED )
+		DEBUG( "[WARN] Expand file err. continue with default. [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+	#endif /* FF_USE_EXPAND */
+
+	while( 1 )
+	{
+		res = f_read( fsrc, buf, bufSize, &br );
+		if ( res != FR_OK )
+		{
+			DEBUG( "[ERR] Srouce file read err. Plz check. [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+			goto aborted;
+		}
+
+		/* End of File. */
+		if ( br == 0 )
+			break;
+
+		res = f_write( fdst, buf, br, &bw );
+		if ( res != FR_OK || bw != br )
+		{
+			DEBUG( "[ERR] No Space. [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+			goto aborted;
+		}
+	}
+
+	f_sync( fdst );
+	f_close( fsrc );
+	f_close( fdst );
+
+	/* Verify: destination size must match source size. */
+	res = f_stat( dest, &fno );
+	if ( res != FR_OK || fno.fsize != fsize )
+	{
+		DEBUG( "[ERR] Size mismatch: src %lu dst %lu with [utils_file_copy]  PATH:%s  LINE:%d.\n",
+				(unsigned long)fsize, (unsigned long)fno.fsize, __FILE__, __LINE__ );
+		/* Delete the broke file. */
+		f_unlink( dest );      
+		return FR_DENIED;
+	}
+
+	
+	DEBUG( "[INFO] Copy OK! [utils_file_copy]\n"
+			"  Dst : %s\n"
+			"  Size: %lu B\n"
+			"  Attr: %c%c%c%c\n"
+			"  Time: %04u-%02u-%02u %02u:%02u:%02u\n",
+			dest,
+			(unsigned long)fno.fsize,
+			(fno.fattrib & AM_RDO) ? 'R' : '-',
+			(fno.fattrib & AM_HID) ? 'H' : '-',
+			(fno.fattrib & AM_SYS) ? 'S' : '-',
+			(fno.fattrib & AM_ARC) ? 'A' : '-',
+			(unsigned)(1980 + ((fno.fdate >> 9) & 0x7F)),
+			(unsigned)((fno.fdate >> 5) & 0x0F),
+			(unsigned)(fno.fdate & 0x1F),
+			(unsigned)((fno.ftime >> 11) & 0x1F),
+			(unsigned)((fno.ftime >> 5) & 0x3F),
+			(unsigned)((fno.ftime & 0x1F) * 2) );
+
+	UTILS_FREE( buf );
+	return FR_OK;
+
+aborted:
+	UTILS_FREE( buf );
+	f_close( fsrc );
+	f_close( fdst );
+	DEBUG( "[INFO] Copy file aborted. [utils_file_copy]  PATH:%s  LINE:%d.\n", __FILE__, __LINE__ );
+	return res;
+}
+
