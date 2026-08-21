@@ -20,10 +20,15 @@
 #define INI_ENTRY_MAX			(32u)
 
 #define LOAD_BUF				(2048u)
+#define INI_SERIALIZE_BUF		(4096u)
 /* *************************************** */
 
-#define INI_MALLOC(size)  malloc(size)
-#define INI_FREE(ptr)     free(ptr)
+#ifndef INI_MALLOC
+    #define INI_MALLOC(size)  malloc(size)
+#endif
+#ifndef INI_FREE
+    #define INI_FREE(ptr)     free(ptr)
+#endif
 
 typedef enum
 {
@@ -59,7 +64,10 @@ typedef struct
 
 
 const char *ini_get_str( const ini_t *cfg, const char *sec, const char *key );
-int8_t ini_str_2_int( const char *str, uint64_t *out );
+int8_t ini_get_int( const ini_t *cfg, const char *sec, const char *key, int64_t *out );
+int8_t ini_get_bool( const ini_t *cfg, const char *sec, const char *key, uint8_t *out );
+int8_t ini_str_2_int( const char *str, int64_t *out );
+int8_t ini_str_2_bool( const char *str, uint8_t *out );
 
 /* ******************** Parse & Output ******************** */
 int8_t ini_parse( const char *buf, uint32_t len, ini_t *cfg );

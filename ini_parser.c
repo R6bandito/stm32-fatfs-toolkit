@@ -103,7 +103,7 @@ ini_save( const char *path, const ini_t *cfg )
 		goto ERR;
 	}
 
-	bufLen = sizeof(ini_t);
+	bufLen = INI_SERIALIZE_BUF;
 	buf = (BYTE *)INI_MALLOC( bufLen );
 	if ( !buf )
 	{
@@ -331,6 +331,8 @@ ini_serialize( char *buf, uint32_t bufLen, uint32_t *olen, const ini_t *cfg )
 			return INI_ERR_PARAM;
 
 	uint32_t used = 0;
+	uint8_t flag = 0;
+	int n;
 	char cur_sec[INI_SEC_LEN] = { 0 };
 
 	for ( uint32_t i = 0; i < cfg->count; i++ )
@@ -345,7 +347,15 @@ ini_serialize( char *buf, uint32_t bufLen, uint32_t *olen, const ini_t *cfg )
 
 			if ( cur_sec[0] != '\0' )
 			{
-				int n = snprintf( buf + used, bufLen - used, "[%s]\r\n", cur_sec );
+				if ( !flag )
+				{
+					n = snprintf( buf + used, bufLen - used, "[%s]\r\n", cur_sec );
+					flag = 1;
+				}
+				else 
+				{
+					n = snprintf( buf + used, bufLen - used, "\r\n[%s]\r\n", cur_sec );
+				}
 				if ( n < 0 || (uint32_t)n >= bufLen - used )
 						return INI_ERR_SERIALIZE;
 				used += (uint32_t)n;
@@ -400,20 +410,27 @@ ini_get_str( const ini_t *cfg, const char *sec, const char *key )
  * @retval INI_OK on success, INI_ERR_INVALID on failure.
  */
 int8_t 
-ini_str_2_int( const char *str, uint64_t *out )
+ini_str_2_int( const char *str, int64_t *out )
 {
 	if ( !str || !out )
 		return INI_ERR_PARAM;
 
 	const char *p = str;
-	uint64_t num = 0;
+	int8_t sign = 1;
+	int64_t num = 0;
+
+	if ( *p == '-' )
+	{
+		sign = -1;
+		p++;
+	}
 
 	if ( *p == '\0' )                      /* empty string */
 		return INI_ERR_INVALID;
 
 	while ( *p >= '0' && *p <= '9' )
 	{
-		uint64_t new_num = num * 10 + (uint64_t)( *p - '0' );
+		int64_t new_num = num * 10 + (int64_t)( *p - '0' );
 		if ( new_num < num )            /* overflow */
 			return INI_ERR_INVALID;
 		num = new_num;
@@ -423,8 +440,97 @@ ini_str_2_int( const char *str, uint64_t *out )
 	if ( *p != '\0' )                      /* trailing non-digit */
 		return INI_ERR_INVALID;
 
-	*out = num;
+	*out = (sign == 1) ? num : -num;
 	return INI_OK;
 }
 
 
+/**
+ * @brief  Convert a string to a boolean value.
+ *         Recognized true values: "TRUE", "True", "true", "1", "YES", "Yes", "yes", "ON", "On", "on".
+ *         Any other value (including empty string) is treated as false.
+ * @param  str  Input string (must be already trimmed).
+ * @param  out  [out] 1 if the string matches a true value, otherwise 0.
+ * @retval INI_OK on success,
+ *         INI_ERR_PARAM if any pointer is NULL,
+ *         INI_ERR_INVALID if the input string is empty.
+ */
+int8_t 
+ini_str_2_bool( const char *str, uint8_t *out )
+{
+	if ( !str || !out )
+		return INI_ERR_PARAM;
+
+	const char *p = str;
+	uint8_t cnt = 0;
+	const char *boolStr[] = { "TRUE", "True", "true", "1", "YES", 
+								"Yes", "yes", "ON", "On", "on" };
+	int len;
+
+	if ( *p == '\0' )
+		return INI_ERR_INVALID;
+
+	do 
+	{
+		if ( strcmp( p, boolStr[cnt] ) == 0 )
+		{
+			*out = 1;
+			return INI_OK;
+		}
+		
+		cnt++;
+	}	while( cnt < (sizeof(boolStr) / sizeof(boolStr[0])) );
+
+	*out = 0;
+	return INI_OK;
+}
+
+
+/**
+ * @brief  Get an integer value from the configuration by section and key.
+ * @param  cfg  Configuration structure.
+ * @param  sec  Section name; empty string "" means the global section.
+ * @param  key  Key name.
+ * @param  out  [out] Parsed integer value on success.
+ * @retval INI_OK on success,
+ *         INI_ERR_PARAM if any pointer is NULL,
+ *         INI_ERR_INVALID if the key is not found or the value is not a valid integer.
+ */
+int8_t 
+ini_get_int( const ini_t *cfg, const char *sec, const char *key, int64_t *out )
+{
+	if ( !cfg || !sec || !key || !out )
+		return INI_ERR_PARAM;
+
+	const char *n = ini_get_str( cfg, sec, key );
+	if ( !n )
+		return INI_ERR_INVALID;
+
+	return ( ini_str_2_int( n, out ) );
+}
+
+
+/**
+ * @brief  Get a boolean value from the configuration by section and key.
+ *         Recognized true values: "TRUE", "True", "true", "1", "YES", "Yes", "yes", "ON", "On", "on".
+ *         Any other value (including empty string) is treated as false.
+ * @param  cfg  Configuration structure.
+ * @param  sec  Section name; empty string "" means the global section.
+ * @param  key  Key name.
+ * @param  out  [out] 1 if the value matches a true string, otherwise 0.
+ * @retval INI_OK on success,
+ *         INI_ERR_PARAM if any pointer is NULL,
+ *         INI_ERR_INVALID if the key is not found.
+ */
+int8_t 
+ini_get_bool( const ini_t *cfg, const char *sec, const char *key, uint8_t *out )
+{
+	if ( !cfg || !sec || !key || !out )
+		return INI_ERR_PARAM;
+
+	const char *n = ini_get_str( cfg, sec, key );
+	if ( !n )
+		return INI_ERR_INVALID;
+
+	return ( ini_str_2_bool( n, out ) );
+}

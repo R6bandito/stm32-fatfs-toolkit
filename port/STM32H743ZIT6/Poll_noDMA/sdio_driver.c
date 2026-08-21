@@ -25,11 +25,13 @@ SD_Card_Init(void)
     HX_SDGPIO_Init();
     __HAL_RCC_SDMMC1_CLK_ENABLE();
 
+    HAL_SD_DeInit( &hsd );
+
     hsd.Instance                 = SDMMC1;
     hsd.Init.BusWide             = SDMMC_BUS_WIDE_4B;
 
-    /* 240Mhz / (2 * 5) = 24Mhz. */
-    hsd.Init.ClockDiv            = 5; 
+    /* 240Mhz / (2 * 3) = 40Mhz. */
+    hsd.Init.ClockDiv            = 3; 
 
     hsd.Init.ClockEdge           = SDMMC_CLOCK_EDGE_RISING;
     hsd.Init.ClockPowerSave      = SDMMC_CLOCK_POWER_SAVE_DISABLE;
@@ -37,7 +39,7 @@ SD_Card_Init(void)
 
     if ( HAL_SD_Init( &hsd ) != HAL_OK )
         return -1;
-
+        
     return 0;
 }
 

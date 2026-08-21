@@ -30,6 +30,8 @@
 
 #define DEV_MMC         0
 
+
+static volatile DSTATUS DiskStatus = STA_NOINIT;
 static uint8_t gs_alignedBuf[512] __attribute__((aligned(4)));
 const uint32_t blockTiemouts = 0xFFFFFFFFul;
 
@@ -79,11 +81,28 @@ DSTATUS disk_status ( BYTE pdrv )
 {
     if ( pdrv == DEV_MMC ) 
     {
-        /* SD card status return normal status directly. */
-        return 0;
-    }
+		/* NOTE: this HAL version returns the raw card-state bits [12:9] of the
+		   CMD13 response. On command failure resp1 stays 0, so the function
+		   returns 0x00 - the CARD_ERROR (0xFF) macro is never produced here. */
+		HAL_SD_CardStateTypeDef state = HAL_SD_GetCardState( &hsd );
+		if ( (state == 0x00U) || (state == HAL_SD_CARD_DISCONNECTED) )
+		{
+			/* CMD13 failed (card removed/unresponsive) or card reports disconnect. */
+			DiskStatus |= STA_NODISK;
+			DiskStatus |= STA_NOINIT;
+		}
+		else
+		{
+			/* Card responds: present and initialized, whatever its busy state
+			   (SENDING/RECEIVING/PROGRAMMING are normal working states). */
+			DiskStatus &= ~STA_NODISK;
+			DiskStatus &= ~STA_NOINIT;
+		}
 
-    return STA_NOINIT;
+		return DiskStatus;
+	}
+
+	return STA_NOINIT;
 }
 
 
@@ -96,14 +115,20 @@ DSTATUS disk_status ( BYTE pdrv )
  */
 DSTATUS disk_initialize ( BYTE pdrv )
 {
-    if ( pdrv != DEV_MMC ) 
-        return STA_NOINIT;
+	if ( pdrv != DEV_MMC ) 
+		return STA_NOINIT;
 
-    /* Initialize the SDIO hardware driver. */
-    if ( SD_Card_Init() < 0 ) 
-        return STA_NOINIT;
+	/* Initialize the SDIO hardware driver. */
+	if ( SD_Card_Init() < 0 ) 
+	{
+		DiskStatus |= STA_NOINIT;
+		return DiskStatus;
+	}
 
-    return 0;
+	DiskStatus &= ~STA_NOINIT;
+	DiskStatus &= ~STA_NODISK;
+
+	return DiskStatus;
 }
 
 
@@ -213,6 +238,24 @@ DRESULT disk_ioctl ( BYTE pdrv, BYTE cmd, void *buff )
             if (__sd_wait_ready() != 0) 
                 return RES_ERROR;
 
+            return RES_OK;
+        }
+
+        case GET_SECTOR_COUNT:
+        {
+            HAL_SD_CardInfoTypeDef info;
+            if ( HAL_SD_GetCardInfo( &hsd, &info ) != HAL_OK )
+                return RES_ERROR;
+            *(DWORD *)buff = info.LogBlockNbr;
+            return RES_OK;
+        }
+
+        case GET_SECTOR_SIZE:
+        {
+            HAL_SD_CardInfoTypeDef info;
+            if ( HAL_SD_GetCardInfo( &hsd, &info ) != HAL_OK )
+                return RES_ERROR;
+            *(DWORD *)buff = info.BlockSize;
             return RES_OK;
         }
     }
